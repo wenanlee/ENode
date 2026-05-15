@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using Sirenix.OdinInspector;
+using Sirenix.OdinInspector.Editor;
+using Sirenix.Serialization;
 using UnityEngine;
 
 namespace XNode {
@@ -23,7 +26,39 @@ namespace XNode {
     /// </code>
     /// </example>
     [Serializable]
-    public abstract class Node : ScriptableObject {
+    public abstract class Node : SerializedScriptableObject {
+        
+        // 用于临时记录index的变量
+        private int _lastDynamicPortIndex;
+        public void OnDynamicPortListChange(InspectorProperty property,CollectionChangeInfo changeInfo, object value)
+        {
+            if (changeInfo.ChangeType == CollectionChangeType.RemoveIndex)
+            {
+                // 记录上一个移动的列表项的Index
+                // 虽然删除列表元素时也会触发该回调，但是移动操作会同时触发移除和插入操作，因此不用担心冲突问题。
+                _lastDynamicPortIndex = changeInfo.Index;
+            }
+            else if(changeInfo.ChangeType == CollectionChangeType.Insert)
+            {
+                string fieldName = property.Name;
+                // 上移Port的Connection
+                if (changeInfo.Index > _lastDynamicPortIndex) {
+                    for (int i = _lastDynamicPortIndex; i < changeInfo.Index; ++i) {
+                        NodePort port = GetPort(fieldName + " " + i);
+                        NodePort nextPort = GetPort(fieldName + " " + (i + 1));
+                        port.SwapConnections(nextPort);
+                    }
+                }
+                // 下移Port的Connection
+                else {
+                    for (int i = _lastDynamicPortIndex; i > changeInfo.Index; --i) {
+                        NodePort port = GetPort(fieldName + " " + i);
+                        NodePort nextPort = GetPort(fieldName + " " + (i - 1));
+                        port.SwapConnections(nextPort);
+                    }
+                }
+            }
+        }
         /// <summary> Used by <see cref="InputAttribute"/> and <see cref="OutputAttribute"/> to determine when to display the field value associated with a <see cref="NodePort"/> </summary>
         public enum ShowBackingValue {
             /// <summary> Never show the backing value </summary>
@@ -51,8 +86,6 @@ namespace XNode {
             Strict,
             /// <summary> Allow connections where output value type is assignable from input value type (eg. Object --> ScriptableObject)</summary>
             InheritedInverse,
-            /// <summary> Allow connections where output value type is assignable from input value or input value type is assignable from output value type</summary>
-            InheritedAny
         }
 
 #region Obsolete
@@ -109,11 +142,14 @@ namespace XNode {
         /// <summary> Iterate over all dynamic inputs on this node. </summary>
         public IEnumerable<NodePort> DynamicInputs { get { foreach (NodePort port in Ports) { if (port.IsDynamic && port.IsInput) yield return port; } } }
         /// <summary> Parent <see cref="NodeGraph"/> </summary>
-        [SerializeField] public NodeGraph graph;
+        [HideInInspector]
+        public NodeGraph graph;
         /// <summary> Position on the <see cref="NodeGraph"/> </summary>
-        [SerializeField] public Vector2 position;
+        [HideInInspector] public Vector2 position;
         /// <summary> It is recommended not to modify these at hand. Instead, see <see cref="InputAttribute"/> and <see cref="OutputAttribute"/> </summary>
-        [SerializeField] private NodePortDictionary ports = new NodePortDictionary();
+        [OdinSerialize]
+        [HideInInspector]
+        private Dictionary<string, NodePort> ports = new Dictionary<string, NodePort>();
 
         /// <summary> Used during node instantiation to fix null/misconfigured graph during OnEnable/Init. Set it before instantiating a node. Will automatically be unset during OnEnable </summary>
         public static NodeGraph graphHotfix;
@@ -288,6 +324,7 @@ namespace XNode {
 
         /// <summary> Mark a serializable field as an output port. You can access this through <see cref="GetOutputPort(string)"/> </summary>
         [AttributeUsage(AttributeTargets.Field)]
+        [DontApplyToListElements]
         public class OutputAttribute : Attribute {
             public ShowBackingValue backingValue;
             public ConnectionType connectionType;
@@ -387,6 +424,26 @@ namespace XNode {
                 this.width = width;
             }
         }
+        
+        /// <summary>
+        /// 自定义标题
+        /// </summary>
+        [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+        public class NodeTitleAttribute : Attribute
+        {
+            public string title;
+            public string nodeType;
+            public bool allowCustomName;
+            public SdfIconType icon;
+            // allowCustomName为是否显示Node的name
+            public NodeTitleAttribute(string title,string nodeType="",SdfIconType icon=SdfIconType.None,bool allowCustomName = true)
+            {
+                this.title = title;
+                this.nodeType = nodeType;
+                this.icon = icon;
+                this.allowCustomName = allowCustomName;
+            }
+        }
 #endregion
 
         [Serializable] private class NodePortDictionary : Dictionary<string, NodePort>, ISerializationCallbackReceiver {
@@ -396,8 +453,6 @@ namespace XNode {
             public void OnBeforeSerialize() {
                 keys.Clear();
                 values.Clear();
-                keys.Capacity = this.Count;
-                values.Capacity = this.Count;
                 foreach (KeyValuePair<string, NodePort> pair in this) {
                     keys.Add(pair.Key);
                     values.Add(pair.Value);
@@ -406,9 +461,6 @@ namespace XNode {
 
             public void OnAfterDeserialize() {
                 this.Clear();
-#if UNITY_2021_3_OR_NEWER                
-                this.EnsureCapacity(keys.Count);
-#endif
 
                 if (keys.Count != values.Count)
                     throw new System.Exception("there are " + keys.Count + " keys and " + values.Count + " values after deserialization. Make sure that both key and value types are serializable.");

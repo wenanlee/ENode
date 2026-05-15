@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,7 +6,8 @@ using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
-using Object = UnityEngine.Object;
+ using XNode;
+ using Object = UnityEngine.Object;
 
 namespace XNodeEditor {
     /// <summary> A set of editor-only utilities and extensions for xNode </summary>
@@ -134,7 +135,9 @@ namespace XNodeEditor {
         /// <param name="compatibleType">Type to find compatiblities</param>
         /// <param name="direction"></param>
         /// <returns>True if NodeType has some port with value type compatible</returns>
-        public static bool HasCompatiblePortType(Type nodeType, Type compatibleType, XNode.NodePort.IO direction = XNode.NodePort.IO.Input) {
+        public static bool HasCompatiblePortType(Type nodeType, Type compatibleType, 
+            XNode.NodePort.IO direction = XNode.NodePort.IO.Input) 
+        {
             Type findType = typeof(XNode.Node.InputAttribute);
             if (direction == XNode.NodePort.IO.Output)
                 findType = typeof(XNode.Node.OutputAttribute);
@@ -144,6 +147,17 @@ namespace XNodeEditor {
             foreach (FieldInfo f in XNode.NodeDataCache.GetNodeFields(nodeType)) {
                 var portAttribute = f.GetCustomAttributes(findType, false).FirstOrDefault();
                 if (portAttribute != null) {
+                    switch (portAttribute)
+                    {
+                        case Node.InputAttribute inputAttribute:
+                            if (inputAttribute.typeConstraint == Node.TypeConstraint.None)
+                                return true;
+                            break;
+                        case Node.OutputAttribute outputAttribute:
+                            if (outputAttribute.typeConstraint == Node.TypeConstraint.None)
+                                return true;
+                            break;
+                    }
                     if (IsCastableTo(f.FieldType, compatibleType)) {
                         return true;
                     }

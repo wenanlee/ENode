@@ -1,7 +1,8 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using System.Linq;
 using UnityEngine.Serialization;
 
 namespace XNodeEditor {
@@ -10,13 +11,14 @@ namespace XNodeEditor {
 
     public static class NodeEditorPreferences {
 
-        /// <summary> The last editor we checked. This should be the one we modify </summary>
-        private static XNodeEditor.NodeGraphEditor lastEditor;
-        /// <summary> The last key we checked. This should be the one we modify </summary>
-        private static string lastKey = "xNode.Settings";
+		/// <summary> The last editor we checked. This should be the one we modify </summary>
+		private static XNodeEditor.NodeGraphEditor lastEditor;
+		/// <summary> The last key we checked. This should be the one we modify </summary>
+		private static string lastKey = "xNode.Settings";
 
-        private static Dictionary<Type, Color> typeColors = new Dictionary<Type, Color>();
-        private static Dictionary<string, Settings> settings = new Dictionary<string, Settings>();
+		private static Dictionary<Type, Color> typeColors = new Dictionary<Type, Color>();
+		private static Dictionary<Type, Color> typeSelectedColors = new Dictionary<Type, Color>();
+		private static Dictionary<string, Settings> settings = new Dictionary<string, Settings>();
 
         [System.Serializable]
         public class Settings : ISerializationCallbackReceiver {
@@ -34,18 +36,70 @@ namespace XNodeEditor {
             public float minZoom = 1f;
             public Color32 tintColor = new Color32(90, 97, 105, 255);
             public Color32 highlightColor = new Color32(255, 255, 255, 255);
-            public bool gridSnap = true;
-            public bool autoSave = true;
+			public bool gridSnap = true;
+			public bool autoSave = true;
             public bool openOnCreate = true;
-            public bool dragToCreate = true;
+			public bool dragToCreate = true;
             public bool createFilter = true;
-            public bool zoomToMouse = true;
+			public bool zoomToMouse = true;
             public bool portTooltips = true;
             [SerializeField] private string typeColorsData = "";
-            [NonSerialized] public Dictionary<string, Color> typeColors = new Dictionary<string, Color>();
-            [FormerlySerializedAs("noodleType")] public NoodlePath noodlePath = NoodlePath.Curvy;
+            [SerializeField] private string typeSelectedColorsData = "";
+            [NonSerialized] private Dictionary<string, Color> typeColors = null;
+            public Dictionary<string, Color> TypeColors
+            {
+                get
+                {
+                    if ( typeColors == null )
+                    {
+				        // Deserialize typeColorsData
+                        typeColors = new Dictionary<string, Color>();
+                        string[] data = typeColorsData.Split( new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries );
+                        for ( int i = 0; i < data.Length; i += 2 )
+                        {
+                            Color col;
+                            if ( ColorUtility.TryParseHtmlString( "#" + data[i + 1], out col ) )
+                            {
+                                typeColors.Add( data[i], col );
+                            }
+                        }
+                    }
+                    return typeColors;
+                }
+                set
+                {
+                }
+            }
+
+            [NonSerialized] private Dictionary<string, Color> typeSelectedColors = null;
+            public Dictionary<string, Color> TypeSelectedColors
+            {
+                get
+                {
+                    if ( typeSelectedColors == null )
+                    {
+                        // Deserialize typeSelectedColorsData
+                        typeSelectedColors = new Dictionary<string, Color>();
+                        string[] data = typeSelectedColorsData.Split( new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries );
+                        for ( int i = 0; i < data.Length; i += 2 )
+                        {
+                            Color col;
+                            if ( ColorUtility.TryParseHtmlString( "#" + data[i + 1], out col ) )
+                            {
+                                typeSelectedColors.Add( data[i], col );
+                            }
+                        }
+                    }
+                    return typeSelectedColors;
+                }
+                set
+                {
+                }
+            }
+			
             public float noodleThickness = 2f;
 
+            [FormerlySerializedAs("noodleType")] public NoodlePath noodlePath = NoodlePath.Curvy;
             public NoodleStroke noodleStroke = NoodleStroke.Full;
 
             private Texture2D _gridTexture;
@@ -63,29 +117,48 @@ namespace XNodeEditor {
                 }
             }
 
-            public void OnAfterDeserialize() {
-                // Deserialize typeColorsData
-                typeColors = new Dictionary<string, Color>();
-                string[] data = typeColorsData.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                for (int i = 0; i < data.Length; i += 2) {
-                    Color col;
-                    if (ColorUtility.TryParseHtmlString("#" + data[i + 1], out col)) {
-                        typeColors.Add(data[i], col);
-                    }
-                }
-            }
+			public void OnAfterDeserialize()
+			{
+			}
 
-            public void OnBeforeSerialize() {
+			public void OnBeforeSerialize()
+			{
                 // Serialize typeColors
-                typeColorsData = "";
-                foreach (var item in typeColors) {
-                    typeColorsData += item.Key + "," + ColorUtility.ToHtmlStringRGB(item.Value) + ",";
-                }
-            }
+                TypeColors.Any();
+				typeColorsData = "";
+				foreach ( var item in typeColors )
+				{
+					typeColorsData += item.Key + "," + ColorUtility.ToHtmlStringRGB( item.Value ) + ",";
+				}
+
+                // Serialize typeSelectedColors
+                TypeSelectedColors.Any();
+                typeSelectedColorsData = "";
+				foreach ( var item in typeSelectedColors )
+				{
+					typeSelectedColorsData += item.Key + "," + ColorUtility.ToHtmlStringRGB( item.Value ) + ",";
+				}
+			}
+		}
+
+        private static Func<string,Settings> GetSettingsOverride = GetSettingsInternal;
+        public static void SetSettingsOverride( Func<string, Settings> settingsOverride )
+        {
+            GetSettingsOverride = settingsOverride;
         }
 
         /// <summary> Get settings of current active editor </summary>
         public static Settings GetSettings() {
+            return GetSettingsInternal();
+        }
+
+        private static Settings GetSettingsInternal( string key ) {
+            if ( !settings.ContainsKey( lastKey ) ) VerifyLoaded();
+            return settings[lastKey];
+        }
+
+        /// <summary> Get settings of current active editor </summary>
+        private static Settings GetSettingsInternal() {
             if (XNodeEditor.NodeEditorWindow.current == null) return new Settings();
 
             if (lastEditor != XNodeEditor.NodeEditorWindow.current.graphEditor) {
@@ -96,13 +169,14 @@ namespace XNodeEditor {
                     lastKey = attrib.editorPrefsKey;
                 } else return null;
             }
-            if (!settings.ContainsKey(lastKey)) VerifyLoaded();
-            return settings[lastKey];
+            return GetSettingsOverride( lastKey );
         }
 
 #if UNITY_2019_1_OR_NEWER
         [SettingsProvider]
         public static SettingsProvider CreateXNodeSettingsProvider() {
+            if ( GetSettingsOverride != GetSettingsInternal )
+                return null;
             SettingsProvider provider = new SettingsProvider("Preferences/Node Editor", SettingsScope.User) {
                 guiHandler = (searchContext) => { XNodeEditor.NodeEditorPreferences.PreferencesGUI(); },
                 keywords = new HashSet<string>(new [] { "xNode", "node", "editor", "graph", "connections", "noodles", "ports" })
@@ -179,30 +253,43 @@ namespace XNodeEditor {
             EditorGUILayout.Space();
         }
 
-        private static void TypeColorsGUI(string key, Settings settings) {
-            //Label
-            EditorGUILayout.LabelField("Types", EditorStyles.boldLabel);
+		private static void TypeColorsGUI( string key, Settings settings )
+		{
+			//Label
+			EditorGUILayout.LabelField( "Types", EditorStyles.boldLabel );
 
-            //Clone keys so we can enumerate the dictionary and make changes.
-            var typeColorKeys = new List<Type>(typeColors.Keys);
+			//Display type colors. Save them if they are edited by the user
+			var keys = typeColors.Keys.ToArray();
+			foreach ( var type in keys )
+			{
+				string typeColorKey = NodeEditorUtilities.PrettyName( type );
+				Color col;
+				typeColors.TryGetValue( type, out col );
+				Color selectedCol = col;
+				typeSelectedColors.TryGetValue( type, out selectedCol );
+				EditorGUI.BeginChangeCheck();
+				EditorGUILayout.BeginHorizontal();
+				EditorGUILayout.PrefixLabel( typeColorKey );
+				EditorGUILayout.LabelField( "Color", GUILayout.Width( 70 ) );
+				col = EditorGUILayout.ColorField( col );
+				EditorGUILayout.LabelField( "Selected", GUILayout.Width( 70 ) );
+				selectedCol = EditorGUILayout.ColorField( selectedCol );
+				EditorGUILayout.EndHorizontal();
+				if ( EditorGUI.EndChangeCheck() )
+				{
+					typeColors[type] = col;
+					if ( settings.TypeColors.ContainsKey( typeColorKey ) ) settings.TypeColors[typeColorKey] = col;
+					else settings.TypeColors.Add( typeColorKey, col );
 
-            //Display type colors. Save them if they are edited by the user
-            foreach (var type in typeColorKeys) {
-                string typeColorKey = NodeEditorUtilities.PrettyName(type);
-                Color col = typeColors[type];
-                EditorGUI.BeginChangeCheck();
-                EditorGUILayout.BeginHorizontal();
-                col = EditorGUILayout.ColorField(typeColorKey, col);
-                EditorGUILayout.EndHorizontal();
-                if (EditorGUI.EndChangeCheck()) {
-                    typeColors[type] = col;
-                    if (settings.typeColors.ContainsKey(typeColorKey)) settings.typeColors[typeColorKey] = col;
-                    else settings.typeColors.Add(typeColorKey, col);
-                    SavePrefs(key, settings);
-                    NodeEditorWindow.RepaintAll();
-                }
-            }
-        }
+					typeSelectedColors[type] = selectedCol;
+					if ( settings.TypeSelectedColors.ContainsKey( typeColorKey ) ) settings.TypeSelectedColors[typeColorKey] = selectedCol;
+					else settings.TypeSelectedColors.Add( typeColorKey, selectedCol );
+
+					SavePrefs( key, settings );
+					NodeEditorWindow.RepaintAll();
+				}
+			}
+		}
 
         /// <summary> Load prefs if they exist. Create if they don't </summary>
         private static Settings LoadPrefs() {
@@ -233,32 +320,90 @@ namespace XNodeEditor {
             if (!settings.ContainsKey(lastKey)) settings.Add(lastKey, LoadPrefs());
         }
 
-        /// <summary> Return color based on type </summary>
-        public static Color GetTypeColor(System.Type type) {
-            VerifyLoaded();
-            if (type == null) return Color.gray;
-            Color col;
-            if (!typeColors.TryGetValue(type, out col)) {
-                string typeName = type.PrettyName();
-                if (settings[lastKey].typeColors.ContainsKey(typeName)) typeColors.Add(type, settings[lastKey].typeColors[typeName]);
-                else {
-#if UNITY_5_4_OR_NEWER
-                    UnityEngine.Random.State oldState = UnityEngine.Random.state;
-                    UnityEngine.Random.InitState(typeName.GetHashCode());
-#else
-                    int oldSeed = UnityEngine.Random.seed;
-                    UnityEngine.Random.seed = typeName.GetHashCode();
-#endif
-                    col = new Color(UnityEngine.Random.value, UnityEngine.Random.value, UnityEngine.Random.value);
-                    typeColors.Add(type, col);
-#if UNITY_5_4_OR_NEWER
-                    UnityEngine.Random.state = oldState;
-#else
-                    UnityEngine.Random.seed = oldSeed;
-#endif
+		/// <summary> Return color based on type </summary>
+		public static Color GetTypeColor( System.Type type )
+		{
+			VerifyLoaded();
+			if ( type == null ) return Color.gray;
+			Color col;
+			Color selectedCol;
+			if ( !typeColors.TryGetValue( type, out col ) )
+			{
+				string typeName = type.PrettyName();
+                if ( settings[lastKey].TypeColors.ContainsKey( typeName ) )
+                {
+                    typeColors.Add( type, settings[lastKey].TypeColors[typeName] );
+                    typeSelectedColors.Add( type, settings[lastKey].TypeSelectedColors[typeName] );
                 }
-            }
-            return col;
-        }
-    }
+                else
+                {
+                    DefaultNoodleColorAttribute defaultColorsAttribute = System.ComponentModel.TypeDescriptor.GetAttributes( type ).OfType<DefaultNoodleColorAttribute>().FirstOrDefault();
+                    if ( defaultColorsAttribute == null )
+                    {
+#if UNITY_5_4_OR_NEWER
+                        UnityEngine.Random.InitState( typeName.GetHashCode() );
+#else
+                        UnityEngine.Random.seed = typeName.GetHashCode();
+#endif
+
+                        selectedCol = new Color( UnityEngine.Random.value, UnityEngine.Random.value, UnityEngine.Random.value );
+                        col = new Color( selectedCol.r * 0.6f, selectedCol.g * 0.6f, selectedCol.b * 0.6f );
+                        typeSelectedColors[type] = selectedCol;
+                        typeColors.Add( type, col );
+                    }
+                    else
+                    {
+                        selectedCol = defaultColorsAttribute.SelectedColor;
+                        col = defaultColorsAttribute.Color;
+                        typeSelectedColors[type] = selectedCol;
+                        typeColors.Add( type, col );
+                    }
+                }
+			}
+			return col;
+		}
+
+		/// <summary> Return color based on type </summary>
+		public static Color GetSelectedTypeColor( System.Type type )
+		{
+			VerifyLoaded();
+			if ( type == null ) return Color.gray;
+            Color col;
+            Color selectedCol;
+            if ( !typeSelectedColors.TryGetValue( type, out selectedCol ) )
+			{
+				string typeName = type.PrettyName();
+                if ( settings[lastKey].TypeSelectedColors.ContainsKey( typeName ) )
+                {
+                    typeColors.Add( type, settings[lastKey].TypeColors[typeName] );
+                    typeSelectedColors.Add( type, settings[lastKey].TypeSelectedColors[typeName] );
+                }
+                else
+                {
+                    DefaultNoodleColorAttribute defaultColorsAttribute = System.ComponentModel.TypeDescriptor.GetAttributes( type ).OfType<DefaultNoodleColorAttribute>().FirstOrDefault();
+                    if ( defaultColorsAttribute == null )
+                    {
+#if UNITY_5_4_OR_NEWER
+                        UnityEngine.Random.InitState( typeName.GetHashCode() );
+#else
+                        UnityEngine.Random.seed = typeName.GetHashCode();
+#endif
+
+                        selectedCol = new Color( UnityEngine.Random.value, UnityEngine.Random.value, UnityEngine.Random.value );
+                        col = new Color( selectedCol.r * 0.6f, selectedCol.g * 0.6f, selectedCol.b * 0.6f );
+                        typeSelectedColors[type] = selectedCol;
+                        typeColors.Add( type, col );
+                    }
+                    else
+                    {
+                        selectedCol = defaultColorsAttribute.SelectedColor;
+                        col = defaultColorsAttribute.Color;
+                        typeSelectedColors[type] = selectedCol;
+                        typeColors.Add( type, col );
+                    }
+                }
+			}
+			return selectedCol;
+		}
+	}
 }

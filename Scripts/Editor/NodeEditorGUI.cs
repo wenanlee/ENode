@@ -1,19 +1,16 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
 using XNodeEditor.Internal;
-#if UNITY_2019_1_OR_NEWER && USE_ADVANCED_GENERIC_MENU
-using GenericMenu = XNodeEditor.AdvancedGenericMenu;
-#endif
 
 namespace XNodeEditor {
     /// <summary> Contains GUI methods </summary>
     public partial class NodeEditorWindow {
         public NodeGraphEditor graphEditor;
-        private readonly HashSet<UnityEngine.Object> selectionCache = new();
-        private readonly HashSet<XNode.Node> culledNodes = new();
+        private List<UnityEngine.Object> selectionCache;
+        private List<XNode.Node> culledNodes;
         /// <summary> 19 if docked, 22 if not </summary>
         private int topPadding { get { return isDocked() ? 19 : 22; } }
         /// <summary> Executed after all other window GUI. Useful if Zoom is ruining your day. Automatically resets after being run.</summary>
@@ -115,21 +112,7 @@ namespace XNodeEditor {
         /// <summary> Show right-click context menu for hovered port </summary>
         void ShowPortContextMenu(XNode.NodePort hoveredPort) {
             GenericMenu contextMenu = new GenericMenu();
-            foreach (var port in hoveredPort.GetConnections()) {
-                var name = port.node.name;
-                var index = hoveredPort.GetConnectionIndex(port);
-                contextMenu.AddItem(new GUIContent(string.Format("Disconnect({0})", name)), false, () => hoveredPort.Disconnect(index));
-            }
             contextMenu.AddItem(new GUIContent("Clear Connections"), false, () => hoveredPort.ClearConnections());
-            //Get compatible nodes with this port
-            if (NodeEditorPreferences.GetSettings().createFilter) {
-                contextMenu.AddSeparator("");
-
-                if (hoveredPort.direction == XNode.NodePort.IO.Input)
-                    graphEditor.AddContextMenuItems(contextMenu, hoveredPort.ValueType, XNode.NodePort.IO.Output);
-                else
-                    graphEditor.AddContextMenuItems(contextMenu, hoveredPort.ValueType, XNode.NodePort.IO.Input);
-            }
             contextMenu.DropDown(new Rect(Event.current.mousePosition, Vector2.zero));
             if (NodeEditorPreferences.GetSettings().autoSave) AssetDatabase.SaveAssets();
         }
@@ -346,8 +329,6 @@ namespace XNodeEditor {
                     if (!_portConnectionPoints.TryGetValue(output, out fromRect)) continue;
 
                     Color portColor = graphEditor.GetPortColor(output);
-                    GUIStyle portStyle = graphEditor.GetPortStyle(output);
-
                     for (int k = 0; k < output.ConnectionCount; k++) {
                         XNode.NodePort input = output.GetConnection(k);
 
@@ -381,11 +362,11 @@ namespace XNodeEditor {
                             // Draw selected reroute points with an outline
                             if (selectedReroutes.Contains(rerouteRef)) {
                                 GUI.color = NodeEditorPreferences.GetSettings().highlightColor;
-                                GUI.DrawTexture(rect, portStyle.normal.background);
+                                GUI.DrawTexture(rect, NodeEditorResources.dotOuter);
                             }
 
                             GUI.color = portColor;
-                            GUI.DrawTexture(rect, portStyle.active.background);
+                            GUI.DrawTexture(rect, NodeEditorResources.dot);
                             if (rect.Overlaps(selectionBox)) selection.Add(rerouteRef);
                             if (rect.Contains(mousePos)) hoveredReroute = rerouteRef;
 
@@ -399,13 +380,8 @@ namespace XNodeEditor {
 
         private void DrawNodes() {
             Event e = Event.current;
-
             if (e.type == EventType.Layout) {
-                selectionCache.Clear();
-                var objs = Selection.objects;
-                selectionCache.EnsureCapacity(objs.Length);
-                foreach (var obj in objs)
-                    selectionCache.Add(obj);
+                selectionCache = new List<UnityEngine.Object>(Selection.objects);
             }
 
             System.Reflection.MethodInfo onValidate = null;
@@ -437,7 +413,7 @@ namespace XNodeEditor {
 
             List<XNode.NodePort> removeEntries = new List<XNode.NodePort>();
 
-            if (e.type == EventType.Layout) culledNodes.Clear();
+            if (e.type == EventType.Layout) culledNodes = new List<XNode.Node>();
             for (int n = 0; n < graph.nodes.Count; n++) {
                 // Skip null nodes. The user could be in the process of renaming scripts, so removing them at this point is not advisable.
                 if (graph.nodes[n] == null) continue;
@@ -555,8 +531,8 @@ namespace XNodeEditor {
             if (e.type != EventType.Layout && currentActivity == NodeActivity.DragGrid) Selection.objects = preSelection.ToArray();
             EndZoomed(position, zoom, topPadding);
 
-            //If a change in is detected in the selected node, call OnValidate method.
-            //This is done through reflection because OnValidate is only relevant in editor,
+            //If a change in is detected in the selected node, call OnValidate method. 
+            //This is done through reflection because OnValidate is only relevant in editor, 
             //and thus, the code should not be included in build.
             if (onValidate != null && EditorGUI.EndChangeCheck()) onValidate.Invoke(Selection.activeObject, null);
         }
@@ -575,21 +551,16 @@ namespace XNodeEditor {
         }
 
         private void DrawTooltip() {
-            if (!NodeEditorPreferences.GetSettings().portTooltips || graphEditor == null)
-                return;
-            string tooltip = null;
-            if (hoveredPort != null) {
-                tooltip = graphEditor.GetPortTooltip(hoveredPort);
-            } else if (hoveredNode != null && IsHoveringNode && IsHoveringTitle(hoveredNode)) {
-                tooltip = NodeEditor.GetEditor(hoveredNode, this).GetHeaderTooltip();
+            if (hoveredPort != null && NodeEditorPreferences.GetSettings().portTooltips && graphEditor != null) {
+                string tooltip = graphEditor.GetPortTooltip(hoveredPort);
+                if (string.IsNullOrEmpty(tooltip)) return;
+                GUIContent content = new GUIContent(tooltip);
+                Vector2 size = NodeEditorResources.styles.tooltip.CalcSize(content);
+                size.x += 8;
+                Rect rect = new Rect(Event.current.mousePosition - (size), size);
+                EditorGUI.LabelField(rect, content, NodeEditorResources.styles.tooltip);
+                Repaint();
             }
-            if (string.IsNullOrEmpty(tooltip)) return;
-            GUIContent content = new GUIContent(tooltip);
-            Vector2 size = NodeEditorResources.styles.tooltip.CalcSize(content);
-            size.x += 8;
-            Rect rect = new Rect(Event.current.mousePosition - (size), size);
-            EditorGUI.LabelField(rect, content, NodeEditorResources.styles.tooltip);
-            Repaint();
         }
     }
 }

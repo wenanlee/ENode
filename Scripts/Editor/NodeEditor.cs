@@ -1,21 +1,22 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Sirenix.OdinInspector;
 using UnityEditor;
 using UnityEngine;
+using XNode;
 #if ODIN_INSPECTOR
 using Sirenix.OdinInspector.Editor;
 using Sirenix.Utilities;
 using Sirenix.Utilities.Editor;
-#endif
-#if UNITY_2019_1_OR_NEWER && USE_ADVANCED_GENERIC_MENU
-using GenericMenu = XNodeEditor.AdvancedGenericMenu;
 #endif
 
 namespace XNodeEditor {
     /// <summary> Base class to derive custom Node editors from. Use this to create your own custom inspectors and editors for your nodes. </summary>
     [CustomNodeEditor(typeof(XNode.Node))]
     public class NodeEditor : XNodeEditor.Internal.NodeEditorBase<NodeEditor, NodeEditor.CustomNodeEditorAttribute, XNode.Node> {
+
+        private readonly Color DEFAULTCOLOR = new Color32(90, 97, 105, 255);
 
         /// <summary> Fires every whenever a node was modified through the editor </summary>
         public static Action<XNode.Node> onUpdateNode;
@@ -24,11 +25,40 @@ namespace XNodeEditor {
 #if ODIN_INSPECTOR
         protected internal static bool inNodeEditor = false;
 #endif
-
-        public virtual void OnHeaderGUI() {
-            GUILayout.Label(target.name, NodeEditorResources.styles.nodeHeader, GUILayout.Height(30));
+        
+        private string title;
+        private bool allowCustomName;
+        private SdfIconType icon;
+        // 获取自定义的标题Attribute
+        /// <summary>
+        /// 每次打开图后，都会创建所有的节点，执行该方法
+        /// </summary>
+        public override void OnCreate()
+        {
+            var nodeTitleAttribute = target.GetType().GetCustomAttribute<Node.NodeTitleAttribute>();
+            if (nodeTitleAttribute != null)
+            {
+                title = nodeTitleAttribute.title;
+                allowCustomName = nodeTitleAttribute.allowCustomName;
+                icon = nodeTitleAttribute.icon;
+            }
+            if (string.IsNullOrEmpty(title))
+                title = target.GetType().Name;
         }
 
+        public virtual void OnHeaderGUI()
+        {
+            GUILayout.BeginHorizontal();
+            SdfIcons.DrawIcon(new Rect(10,7.5f,20,20),icon);
+            // 绘制自定义的标题头
+            if (allowCustomName)
+                GUILayout.Label($"{title}", //({target.name})",
+                    NodeEditorResources.styles.nodeHeader,
+                    GUILayout.Height(30));
+            else
+                GUILayout.Label(title, NodeEditorResources.styles.nodeHeader, GUILayout.Height(30));
+            GUILayout.EndHorizontal();
+        }
         /// <summary> Draws standard field editors for all public fields </summary>
         public virtual void OnBodyGUI() {
 #if ODIN_INSPECTOR
@@ -42,32 +72,10 @@ namespace XNodeEditor {
             string[] excludes = { "m_Script", "graph", "position", "ports" };
 
 #if ODIN_INSPECTOR
-            try
-            {
-#if ODIN_INSPECTOR_3
-                objectTree.BeginDraw( true );
-#else
-                InspectorUtilities.BeginDrawPropertyTree(objectTree, true);
-#endif
-            }
-            catch ( ArgumentNullException )
-            {
-#if ODIN_INSPECTOR_3
-                objectTree.EndDraw();
-#else
-                InspectorUtilities.EndDrawPropertyTree(objectTree);
-#endif
-                NodeEditor.DestroyEditor(this.target);
-                return;
-            }
-
-            GUIHelper.PushLabelWidth( 84 );
-            objectTree.Draw( true );
-#if ODIN_INSPECTOR_3
+           objectTree.BeginDraw(true);
+            GUIHelper.PushLabelWidth(84);
+            objectTree.Draw(true);
             objectTree.EndDraw();
-#else
-            InspectorUtilities.EndDrawPropertyTree(objectTree);
-#endif
             GUIHelper.PopLabelWidth();
 #else
 
@@ -116,7 +124,7 @@ namespace XNodeEditor {
             Color color;
             if (type.TryGetAttributeTint(out color)) return color;
             // Return default color (grey)
-            else return NodeEditorPreferences.GetSettings().tintColor;
+            else return DEFAULTCOLOR;
         }
 
         public virtual GUIStyle GetBodyStyle() {
@@ -125,11 +133,6 @@ namespace XNodeEditor {
 
         public virtual GUIStyle GetBodyHighlightStyle() {
             return NodeEditorResources.styles.nodeHighlight;
-        }
-
-        /// <summary> Override to display custom node header tooltips </summary>
-        public virtual string GetHeaderTooltip() {
-            return null;
         }
 
         /// <summary> Add items for the context menu when right-clicking this node. Override to add custom menu items. </summary>

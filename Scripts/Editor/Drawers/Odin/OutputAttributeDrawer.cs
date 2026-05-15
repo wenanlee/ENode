@@ -37,7 +37,17 @@ namespace XNodeEditor {
 					if (labelWidth != null)
 						GUIHelper.PushLabelWidth(labelWidth.Width);
 
-					NodeEditorGUILayout.PropertyField(portPropoerty, label == null ? GUIContent.none : label, true, GUILayout.MinWidth(30));
+					if (Attribute.dynamicPortList)
+					{
+						CallNextDrawer(label);
+						NodeEditorGUILayout.DrawDynamicPortList(Property,NodePort.IO.Output,
+						Attribute.connectionType,Attribute.typeConstraint);
+					}
+					else
+					{
+						NodeEditorGUILayout.PropertyField(portPropoerty, label == null ? GUIContent.none : label, 
+							true, GUILayout.MinWidth(30));
+					}
 
 					if (labelWidth != null)
 						GUIHelper.PopLabelWidth();
