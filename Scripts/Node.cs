@@ -1,9 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Sirenix.OdinInspector;
-using Sirenix.OdinInspector.Editor;
 using Sirenix.Serialization;
 using UnityEngine;
+#if UNITY_EDITOR
+using Sirenix.OdinInspector.Editor;
+#endif
 
 namespace XNode {
     /// <summary>
@@ -28,20 +30,17 @@ namespace XNode {
     [Serializable]
     public abstract class Node : SerializedScriptableObject {
         
-        // 用于临时记录index的变量
         private int _lastDynamicPortIndex;
+#if UNITY_EDITOR
         public void OnDynamicPortListChange(InspectorProperty property,CollectionChangeInfo changeInfo, object value)
         {
             if (changeInfo.ChangeType == CollectionChangeType.RemoveIndex)
             {
-                // 记录上一个移动的列表项的Index
-                // 虽然删除列表元素时也会触发该回调，但是移动操作会同时触发移除和插入操作，因此不用担心冲突问题。
                 _lastDynamicPortIndex = changeInfo.Index;
             }
             else if(changeInfo.ChangeType == CollectionChangeType.Insert)
             {
                 string fieldName = property.Name;
-                // 上移Port的Connection
                 if (changeInfo.Index > _lastDynamicPortIndex) {
                     for (int i = _lastDynamicPortIndex; i < changeInfo.Index; ++i) {
                         NodePort port = GetPort(fieldName + " " + i);
@@ -49,7 +48,6 @@ namespace XNode {
                         port.SwapConnections(nextPort);
                     }
                 }
-                // 下移Port的Connection
                 else {
                     for (int i = _lastDynamicPortIndex; i > changeInfo.Index; --i) {
                         NodePort port = GetPort(fieldName + " " + i);
@@ -59,6 +57,7 @@ namespace XNode {
                 }
             }
         }
+#endif
         /// <summary> Used by <see cref="InputAttribute"/> and <see cref="OutputAttribute"/> to determine when to display the field value associated with a <see cref="NodePort"/> </summary>
         public enum ShowBackingValue {
             /// <summary> Never show the backing value </summary>
@@ -425,24 +424,29 @@ namespace XNode {
             }
         }
         
-        /// <summary>
-        /// 自定义标题
-        /// </summary>
         [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
         public class NodeTitleAttribute : Attribute
         {
             public string title;
             public string nodeType;
             public bool allowCustomName;
-            public SdfIconType icon;
-            // allowCustomName为是否显示Node的name
-            public NodeTitleAttribute(string title,string nodeType="",SdfIconType icon=SdfIconType.None,bool allowCustomName = true)
+#if UNITY_EDITOR
+            public Sirenix.OdinInspector.SdfIconType icon;
+            public NodeTitleAttribute(string title,string nodeType="",Sirenix.OdinInspector.SdfIconType icon=Sirenix.OdinInspector.SdfIconType.None,bool allowCustomName = true)
             {
                 this.title = title;
                 this.nodeType = nodeType;
                 this.icon = icon;
                 this.allowCustomName = allowCustomName;
             }
+#else
+            public NodeTitleAttribute(string title,string nodeType="",bool allowCustomName = true)
+            {
+                this.title = title;
+                this.nodeType = nodeType;
+                this.allowCustomName = allowCustomName;
+            }
+#endif
         }
 #endregion
 
